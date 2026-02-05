@@ -23,6 +23,10 @@ DB_PATH = "inbox.db"
 # === ИНИЦИАЛИЗАЦИЯ ===
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
+@dp.message()
+async def _debug_all(message: Message):
+    if message.from_user and message.from_user.id == ADMIN_ID:
+        print("ADMIN MSG:", repr(message.text))
 
 
 # === КНОПКА ОТВЕТА ===
@@ -296,4 +300,5 @@ async def admin_show(message: Message):
         f"name: {full_name if full_name else '-'}\n\n"
         f"{text or ''}"
     )
+
 
