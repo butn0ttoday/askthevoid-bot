@@ -255,3 +255,43 @@ async def main():
 if __name__ == "__main__":
 
     asyncio.run(main())
+@dp.message(F.from_user.id == ADMIN_ID, F.text == "/inbox")
+async def admin_inbox(message: Message):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT id, created_at, user_id FROM tickets ORDER BY id DESC LIMIT 10"
+        )
+        rows = await cur.fetchall()
+
+    if not rows:
+        await message.answer("Пусто.")
+        return
+
+    text = ["📥 Последние сообщения:"]
+    for tid, created_at, user_id in rows:
+        text.append(f"#{tid} • {created_at} • user_id={user_id}")
+
+    text.append("\nПосмотреть: /show <id>")
+    await message.answer("\n".join(text))
+@dp.message(F.from_user.id == ADMIN_ID, F.text.regexp(r"^/show\s+\d+$"))
+async def admin_show(message: Message):
+    ticket_id = int(message.text.split()[-1])
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT user_id, username, full_name, text FROM tickets WHERE id=?",
+            (ticket_id,),
+        )
+        row = await cur.fetchone()
+
+    if not row:
+        await message.answer("Не найдено.")
+        return
+
+    user_id, username, full_name, text = row
+    await message.answer(
+        f"user_id: {user_id}\n"
+        f"username: @{username if username else '-'}\n"
+        f"name: {full_name if full_name else '-'}\n\n"
+        f"{text or ''}"
+    )
