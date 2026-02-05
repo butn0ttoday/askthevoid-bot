@@ -3,6 +3,7 @@ import asyncio
 import aiosqlite
 
 print("BOOT: script started")
+print("BOOT VERSION: inbox-v1")
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
@@ -295,3 +296,4 @@ async def admin_show(message: Message):
         f"name: {full_name if full_name else '-'}\n\n"
         f"{text or ''}"
     )
+
