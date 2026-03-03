@@ -42,6 +42,7 @@ def reply_kb(ticket_id: int) -> InlineKeyboardMarkup:
 # === БАЗА ДАННЫХ ===
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DROP TABLE IF EXISTS tickets")
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS tickets (
@@ -243,7 +244,6 @@ async def admin_show(message: Message):
 # === ОТПРАВКА ОТВЕТА АВТОРУ (админ / канал) ===
 @dp.message(F.from_user.id == ADMIN_ID)
 async def admin_send(message: Message):
-    # Ответ из канала (пересланный в бота пост)
     is_channel_post = (
         message.forward_origin
         and isinstance(message.forward_origin, MessageOriginChannel)
@@ -282,7 +282,6 @@ async def admin_send(message: Message):
         else:
             return
 
-        # подтверждение отправки только если ответ был из ЛС админа
         if not is_channel_post:
             await message.answer("✅ Ответ отправлен.")
 
