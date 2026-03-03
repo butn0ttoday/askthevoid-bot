@@ -23,10 +23,6 @@ DB_PATH = "inbox.db"
 # === ИНИЦИАЛИЗАЦИЯ ===
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
-@dp.message()
-async def _debug_all(message: Message):
-    if message.from_user and message.from_user.id == ADMIN_ID:
-        print("ADMIN MSG:", repr(message.text))
 
 
 # === КНОПКА ОТВЕТА ===
@@ -50,7 +46,11 @@ async def init_db():
             """
             CREATE TABLE IF NOT EXISTS tickets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                full_name TEXT,
+                text TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -65,11 +65,11 @@ async def init_db():
         await db.commit()
 
 
-async def create_ticket(user_id: int) -> int:
+async def create_ticket(user_id: int, username: str, full_name: str, text: str) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
-            "INSERT INTO tickets(user_id) VALUES (?)",
-            (user_id,),
+            "INSERT INTO tickets(user_id, username, full_name, text) VALUES (?, ?, ?, ?)",
+            (user_id, username, full_name, text),
         )
         await db.commit()
         return cur.lastrowid
@@ -121,7 +121,11 @@ async def get_ticket_user(ticket_id: int):
 # === ПРИЁМ АНОНИМОК ===
 @dp.message(F.from_user.id != ADMIN_ID)
 async def inbox(message: Message):
-    ticket_id = await create_ticket(message.from_user.id)
+    username = message.from_user.username or ""
+    full_name = message.from_user.full_name or ""
+    text_content = message.text or message.caption or ""
+
+    ticket_id = await create_ticket(message.from_user.id, username, full_name, text_content)
 
     await message.answer("Принято 🖤 Ответ будет в канале @hexandhush.")
 
@@ -190,76 +194,7 @@ async def cancel(message: Message):
     await message.answer("Режим ответа отменён.")
 
 
-# === ОТПРАВКА ОТВЕТА АВТОРУ (админ / канал) ===
-@dp.message()
-async def admin_send(message: Message):
-    # Ответ из ЛС админа
-    is_admin_dm = message.from_user and message.from_user.id == ADMIN_ID
-
-    # Ответ из канала (пересланный в бота пост)
-    is_channel_post = (
-        message.forward_origin
-        and isinstance(message.forward_origin, MessageOriginChannel)
-        and message.forward_origin.chat.id == CHANNEL_ID
-    )
-
-    if not (is_admin_dm or is_channel_post):
-        return
-
-    ticket_id = await get_admin_reply_target()
-    if not ticket_id:
-        return
-
-    user_id = await get_ticket_user(ticket_id)
-    if not user_id:
-        await clear_admin_reply_target()
-        return
-
-    prefix = f"↩️ Ответ на анонимку #{ticket_id}:\n\n"
-
-    try:
-        if message.text and message.text != "/cancel":
-            await bot.send_message(user_id, prefix + message.text)
-
-        elif message.photo:
-            await bot.send_photo(
-                user_id,
-                message.photo[-1].file_id,
-                caption=prefix + (message.caption or ""),
-            )
-
-        elif message.video:
-            await bot.send_video(
-                user_id,
-                message.video.file_id,
-                caption=prefix + (message.caption or ""),
-            )
-
-        else:
-            return
-
-        # подтверждение отправки только если ответ был из ЛС админа
-        if is_admin_dm:
-            await message.answer("✅ Ответ отправлен.")
-
-    except Exception as e:
-        print("SEND ERROR:", e)
-        if is_admin_dm:
-            await message.answer(f"❌ Ошибка отправки: {e}")
-
-    await clear_admin_reply_target()
-
-
-# === ЗАПУСК ===
-async def main():
-    await init_db()
-    print("BOOT: polling starting")
-    await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-
-    asyncio.run(main())
+# === СПИСОК ПОСЛЕДНИХ АНОНИМОК ===
 @dp.message(F.from_user.id == ADMIN_ID, F.text == "/inbox")
 async def admin_inbox(message: Message):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -278,6 +213,9 @@ async def admin_inbox(message: Message):
 
     text.append("\nПосмотреть: /show <id>")
     await message.answer("\n".join(text))
+
+
+# === ПРОСМОТР АНОНИМКИ ===
 @dp.message(F.from_user.id == ADMIN_ID, F.text.regexp(r"^/show\s+\d+$"))
 async def admin_show(message: Message):
     ticket_id = int(message.text.split()[-1])
@@ -302,3 +240,65 @@ async def admin_show(message: Message):
     )
 
 
+# === ОТПРАВКА ОТВЕТА АВТОРУ (админ / канал) ===
+@dp.message(F.from_user.id == ADMIN_ID)
+async def admin_send(message: Message):
+    # Ответ из канала (пересланный в бота пост)
+    is_channel_post = (
+        message.forward_origin
+        and isinstance(message.forward_origin, MessageOriginChannel)
+        and message.forward_origin.chat.id == CHANNEL_ID
+    )
+
+    ticket_id = await get_admin_reply_target()
+    if not ticket_id:
+        return
+
+    user_id = await get_ticket_user(ticket_id)
+    if not user_id:
+        await clear_admin_reply_target()
+        return
+
+    prefix = f"↩️ Ответ на анонимку #{ticket_id}:\n\n"
+
+    try:
+        if message.text:
+            await bot.send_message(user_id, prefix + message.text)
+
+        elif message.photo:
+            await bot.send_photo(
+                user_id,
+                message.photo[-1].file_id,
+                caption=prefix + (message.caption or ""),
+            )
+
+        elif message.video:
+            await bot.send_video(
+                user_id,
+                message.video.file_id,
+                caption=prefix + (message.caption or ""),
+            )
+
+        else:
+            return
+
+        # подтверждение отправки только если ответ был из ЛС админа
+        if not is_channel_post:
+            await message.answer("✅ Ответ отправлен.")
+
+    except Exception as e:
+        print("SEND ERROR:", e)
+        await message.answer(f"❌ Ошибка отправки: {e}")
+
+    await clear_admin_reply_target()
+
+
+# === ЗАПУСК ===
+async def main():
+    await init_db()
+    print("BOOT: polling starting")
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
